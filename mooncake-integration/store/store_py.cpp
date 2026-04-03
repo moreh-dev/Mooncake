@@ -1009,7 +1009,8 @@ PYBIND11_MODULE(store, m) {
                const std::string &protocol = "tcp",
                const std::string &rdma_devices = "",
                const std::string &master_server_addr = "127.0.0.1:50051",
-               const py::object &engine = py::none()) {
+               const py::object &engine = py::none(),
+               bool enable_offload = false) {
                 self.use_dummy_client_ = false;
                 self.store_ = std::make_shared<RealClient>();
                 ResourceTracker::getInstance().registerInstance(
@@ -1023,12 +1024,14 @@ PYBIND11_MODULE(store, m) {
                 return self.store_->setup_real(
                     local_hostname, metadata_server, global_segment_size,
                     local_buffer_size, protocol, rdma_devices,
-                    master_server_addr, transfer_engine, "");
+                    master_server_addr, transfer_engine, "",
+                    enable_offload);
             },
             py::arg("local_hostname"), py::arg("metadata_server"),
             py::arg("global_segment_size"), py::arg("local_buffer_size"),
             py::arg("protocol"), py::arg("rdma_devices"),
-            py::arg("master_server_addr"), py::arg("engine") = py::none())
+            py::arg("master_server_addr"), py::arg("engine") = py::none(),
+            py::arg("enable_offload") = false)
         .def(
             "setup_dummy",
             [](MooncakeStorePyWrapper &self, size_t mem_pool_size,
