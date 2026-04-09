@@ -76,8 +76,7 @@ class RealClient : public PyClient {
         const std::string &rdma_devices = "",
         const std::string &master_server_addr = "127.0.0.1:50051",
         const std::shared_ptr<TransferEngine> &transfer_engine = nullptr,
-        const std::string &ipc_socket_path = "",
-        bool enable_offload = false);
+        const std::string &ipc_socket_path = "", bool enable_offload = false);
 
     int setup_dummy(size_t mem_pool_size, size_t local_buffer_size,
                     const std::string &server_address,
@@ -663,9 +662,12 @@ class RealClient : public PyClient {
     int start_http_server();
     void stop_http_server();
 
+    // Auto-assign RPC port for client RPC server
+    void auto_assign_rpc_address(const std::string &host_prefix,
+                                 int local_rpc_port, int fallback_port);
+
     // Embedded Client RPC server for offload object reads
     std::unique_ptr<coro_rpc::coro_rpc_server> client_rpc_server_;
-    std::jthread client_rpc_thread_;
     int start_client_rpc_server();
     void stop_client_rpc_server();
 
