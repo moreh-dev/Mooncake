@@ -3459,6 +3459,18 @@ RealClient::batch_get_into_internal(const std::vector<std::string> &keys,
 
         if (query_result_values.replicas.size() == 1 &&
             query_result_values.replicas.at(0).is_local_disk_replica()) {
+            // Same-node fast path: bypass RPC + RDMA self-loopback when the
+            // LOCAL_DISK replica's transport_endpoint matches this process.
+            // Falls through to the regular RPC path on cross-node, GPU buffer,
+            // or any pre-condition failure (fail-soft, see §3.6 of spec).
+            const auto &ld_desc =
+                query_result_values.replicas.at(0).get_local_disk_descriptor();
+            if (!key_slices.empty() &&
+                try_local_disk_fast_path(key, ld_desc, key_slices.at(0),
+                                         total_size, results, i)) {
+                continue;
+            }
+
             valid_local_disk_operations.emplace(
                 key,
                 ValidKeyInfo{.key = key,
