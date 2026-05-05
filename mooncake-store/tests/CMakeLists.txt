@@ -81,6 +81,21 @@ add_store_test(dummy_client_get_buffer_test dummy_client_get_buffer_test.cpp)
 add_store_test(health_check_test health_check_test.cpp)
 add_store_test(test_real_client_local_fast_path
                test_real_client_local_fast_path.cpp)
+# Propagate the GPU runtime compile definitions to the fast-path test so that
+# test__gpu_pointer_falls_back is active on GPU-enabled builds.
+# gpu_staging_utils.h requires USE_HIP/USE_CUDA to select the right backend;
+# these are PRIVATE on mooncake_store and are not forwarded to consumers.
+# hip::host carries INTERFACE_COMPILE_DEFINITIONS "__HIP_PLATFORM_AMD__=1"
+# and (via hip::amdhip64) the /opt/rocm/include path.
+if(NOT CUDAToolkit_FOUND)
+    find_package(hip QUIET)
+    if(hip_FOUND)
+        target_compile_definitions(test_real_client_local_fast_path
+            PRIVATE USE_HIP)
+        target_link_libraries(test_real_client_local_fast_path
+            PRIVATE hip::host)
+    endif()
+endif()
 add_subdirectory(e2e)
 
 add_executable(high_availability_test ha/leadership/high_availability_test.cpp)

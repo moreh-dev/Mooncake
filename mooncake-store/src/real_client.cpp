@@ -4275,8 +4275,13 @@ RealClient::batch_get_into_offload_object_internal(
 // Returns true when the destination pointer resides in host (CPU) memory.
 // GPU device pointers must fall through to the regular RPC+RDMA path so
 // that the RDMA engine can copy directly into the device buffer.
-// If no GPU runtime is compiled in, every pointer is treated as a host pointer
-// (safe default: fast path will be attempted; memcpy on a non-GPU ptr is fine).
+// Verified fallback semantics (gpu_staging_utils.h):
+//   USE_HIP   defined: hipPointerGetAttributes -> true for device memory
+//   USE_CUDA  defined: cudaPointerGetAttributes -> true for device memory
+//   neither defined: all branches are preprocessed away; function returns
+//     false unconditionally (line 43 of gpu_staging_utils.h).
+//     is_host_pointer therefore returns true for every pointer, which is
+//     safe: memcpy on a host pointer is correct and no GPU runtime is present.
 static bool is_host_pointer(const void *ptr) {
     return !gpu_staging::IsDevicePointer(ptr, nullptr);
 }
