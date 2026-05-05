@@ -28,6 +28,7 @@
 #include "default_config.h"
 #include "shm_helper.h"
 #include "memory_location.h"
+#include "gpu_staging_utils.h"
 #ifdef USE_ASCEND_DIRECT
 #include "acl/acl_rt.h"
 #include "transport/ascend_transport/ascend_direct_transport/context_manager.h"
@@ -4257,6 +4258,84 @@ RealClient::batch_get_into_offload_object_internal(
         return tl::make_unexpected(ErrorCode::OBJECT_HAS_LEASE);
     }
     return {};
+}
+
+// Returns true when the destination pointer resides in host (CPU) memory.
+// GPU device pointers must fall through to the regular RPC+RDMA path so
+// that the RDMA engine can copy directly into the device buffer.
+// If no GPU runtime is compiled in, every pointer is treated as a host pointer
+// (safe default: fast path will be attempted; memcpy on a non-GPU ptr is fine).
+static bool is_host_pointer(const void *ptr) {
+    return !gpu_staging::IsDevicePointer(ptr, nullptr);
+}
+
+bool RealClient::try_local_disk_fast_path(
+    const std::string &key, const LocalDiskDescriptor &ld_desc,
+    const Slice &dst_slice, size_t total_size,
+    std::vector<tl::expected<int64_t, ErrorCode>> &results,
+    size_t result_index) {
+    // Pre-condition 1: replica must belong to this exact process (host:port).
+    // Using host:port (not IP-only) guards against multi-process per-node
+    // scenarios where two clients on the same host have different auto-assigned
+    // ports (see upstream PR #1995).
+    if (ld_desc.transport_endpoint != this->local_rpc_addr) {
+        return false;
+    }
+    // Pre-condition 2: this client must own a FileStorage instance.
+    // Clients started without enable_ssd_offload have file_storage_ == nullptr
+    // and never create LOCAL_DISK replicas, so this should not normally
+    // trigger.
+    if (this->file_storage_ == nullptr) {
+        return false;
+    }
+    // Pre-condition 3: destination buffer must be a host (CPU) pointer.
+    // GPU pointers require RDMA (or hipMemcpy) which is handled by the regular
+    // path.  GPU buffer support is a stretch goal (see spec §2.5).
+    if (!is_host_pointer(dst_slice.ptr)) {
+        return false;
+    }
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    // Step 1: read from SSD into the FileStorage internal client buffer.
+    auto batch_res = this->file_storage_->BatchGet(
+        {key}, {static_cast<int64_t>(total_size)});
+    if (!batch_res) {
+        // Real read failure. Fall through so the caller can retry via the
+        // regular RPC path which may provide a better error pipeline.
+        return false;
+    }
+
+    // Step 2: copy from the temporary buffer into the caller buffer.
+    void *src_ptr = reinterpret_cast<void *>(batch_res.value().pointers.at(0));
+    std::memcpy(dst_slice.ptr, src_ptr, total_size);
+
+    uint64_t batch_id = batch_res.value().batch_id;
+
+    // Step 3: release the temporary buffer (synchronous, local call).
+    this->file_storage_->ReleaseBuffer(batch_id);
+
+    auto end_time = std::chrono::steady_clock::now();
+    auto elapsed_ms = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_time -
+                                                              start_time)
+            .count());
+
+    // Step 4: lease/TTL guard. Mirrors the check in
+    // batch_get_into_offload_object_internal (real_client.cpp:4256-4258).
+    // If elapsed time exceeded the GC TTL the temporary buffer may have been
+    // reclaimed by the GC thread between the memcpy and the ReleaseBuffer call.
+    // The caller buffer has already been written at this point so we cannot
+    // safely fall through to the regular path; report the lease error instead.
+    if (elapsed_ms >=
+        static_cast<uint64_t>(
+            this->file_storage_->config_.client_buffer_gc_ttl_ms)) {
+        results[result_index] = tl::unexpected(ErrorCode::OBJECT_HAS_LEASE);
+        return true;
+    }
+
+    results[result_index] = static_cast<int64_t>(total_size);
+    return true;
 }
 
 ClientRequester::ClientRequester() {

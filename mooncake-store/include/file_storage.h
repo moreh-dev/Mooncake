@@ -51,6 +51,7 @@ class FileStorage {
 
    private:
     friend class FileStorageTest;
+    friend class LocalFastPathTest;
     struct AllocatedBatch {
         uint64_t batch_id;
         std::vector<BufferHandle> handles;

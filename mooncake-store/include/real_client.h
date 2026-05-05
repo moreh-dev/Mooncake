@@ -667,6 +667,29 @@ class RealClient : public PyClient {
         const std::string &target_rpc_service_addr,
         std::unordered_map<std::string, Slice> &objects);
 
+    /**
+     * @brief Same-node LOCAL_DISK fast path for batch_get_into_internal.
+     *
+     * Returns true if this method successfully handled the key (either by
+     * completing the read or by recording an error in results[result_index]).
+     * Returns false if the caller must fall through to the regular RPC path.
+     *
+     * Pre-conditions that trigger fallthrough (false return):
+     *   1. ld_desc.transport_endpoint != local_rpc_addr (different node/port).
+     *   2. file_storage_ == nullptr (SSD offload not enabled on this client).
+     *   3. dst_slice.ptr is a GPU device pointer.
+     *   4. file_storage_->BatchGet() fails.
+     *
+     * On success, results[result_index] is set to total_size.
+     * On lease/TTL expiry, results[result_index] is set to
+     * static_cast<int64_t>(ErrorCode::OBJECT_HAS_LEASE) and true is returned.
+     */
+    bool try_local_disk_fast_path(
+        const std::string &key, const LocalDiskDescriptor &ld_desc,
+        const Slice &dst_slice, size_t total_size,
+        std::vector<tl::expected<int64_t, ErrorCode>> &results,
+        size_t result_index);
+
     std::unique_ptr<AutoPortBinder> port_binder_ = nullptr;
 
     struct SegmentDeleter {
