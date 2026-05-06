@@ -50,6 +50,11 @@ class FileStorage {
     bool ReleaseBuffer(uint64_t batch_id);
 
    private:
+    // Test fixtures need access to internal state (storage_backend_,
+    // client_buffer_allocator_) to construct realistic put/get scenarios
+    // without spinning up a full Master + Client. Friend declarations
+    // do not affect production binaries; they only widen access for
+    // the named test classes when they are linked in (BUILD_UNIT_TESTS=ON).
     friend class FileStorageTest;
     friend class LocalFastPathTest;
     struct AllocatedBatch {

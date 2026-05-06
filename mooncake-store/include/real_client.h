@@ -683,6 +683,13 @@ class RealClient : public PyClient {
      * On success, results[result_index] is set to total_size.
      * On lease/TTL expiry, results[result_index] is set to
      * static_cast<int64_t>(ErrorCode::OBJECT_HAS_LEASE) and true is returned.
+     *
+     * NOTE on lease/TTL expiry: when the helper returns true with
+     * OBJECT_HAS_LEASE, the destination buffer at dst_slice.ptr has already
+     * been written via memcpy and may contain stale or partially-reclaimed
+     * bytes. Callers MUST check results[result_index] before reading from
+     * the destination buffer. This mirrors the regular RPC path's behavior
+     * in batch_get_into_offload_object_internal.
      */
     bool try_local_disk_fast_path(
         const std::string &key, const LocalDiskDescriptor &ld_desc,

@@ -3465,7 +3465,11 @@ RealClient::batch_get_into_internal(const std::vector<std::string> &keys,
             // or any pre-condition failure (fail-soft, see §3.6 of spec).
             const auto &ld_desc =
                 query_result_values.replicas.at(0).get_local_disk_descriptor();
-            if (!key_slices.empty() &&
+            // LOCAL_DISK replicas always allocate a single slice covering the
+            // whole object (see client_buffer.cpp:153-155 in allocateSlices).
+            // Guard against future multi-slice extensions silently truncating
+            // to slice 0 in the fast path.
+            if (key_slices.size() == 1 &&
                 try_local_disk_fast_path(key, ld_desc, key_slices.at(0),
                                          total_size, results, i)) {
                 continue;
